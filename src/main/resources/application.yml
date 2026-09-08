@@ -36,7 +36,7 @@ domistats:
   # Cache TTL for alliance detail pages (they don't change second-to-second).
   alliance-cache-ttl-seconds: ${DOMISTATS_ALLIANCE_CACHE_TTL:60}
   spinning-cache-ttl-seconds: ${DOMISTATS_SPINNING_CACHE_TTL:30}
-  user-agent: ${DOMISTATS_USER_AGENT:DomiStatsWarRadarBot/1.0 (+contact: your-email@example.com)}
+  user-agent: "${DOMISTATS_USER_AGENT:DomiStatsWarRadarBot/1.0 (+contact: your-email@example.com)}"
   request-timeout-ms: 10000
   max-retries: 4
   retry-base-backoff-ms: 500
