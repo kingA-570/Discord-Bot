@@ -1,5 +1,6 @@
 [build]
 builder = "nixpacks"
+nixpacksConfigPath = "nixpacks.toml"
 
 [deploy]
 startCommand = "java -jar target/domistats-bot.jar"
