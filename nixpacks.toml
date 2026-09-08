@@ -1,8 +1,8 @@
 [variables]
 "JAVA_VERSION" = "21"
 
-[phases]
-setup = "apt-get update && apt-get install -y openjdk-21-jdk && update-alternatives --set java /usr/lib/jvm/java-21-openjdk-amd64/bin/java"
+[phases.setup]
+nixPkgs = ["jdk21", "maven"]
 
 [start]
 cmd = "java -jar target/domistats-bot.jar"
