@@ -2,6 +2,8 @@ package com.domistats.bot.config;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -11,9 +13,12 @@ import java.net.URI;
 @Configuration
 public class DatabaseConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(DatabaseConfig.class);
+
     @Bean
     public javax.sql.DataSource dataSource() {
         String databaseUrl = System.getenv("DATABASE_URL");
+        log.info("DATABASE_URL present: {}", databaseUrl != null && !databaseUrl.isBlank());
         HikariConfig config = new HikariConfig();
         config.setDriverClassName("org.postgresql.Driver");
 
