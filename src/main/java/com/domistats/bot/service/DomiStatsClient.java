@@ -17,8 +17,10 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Matcher;
@@ -60,34 +62,77 @@ public class DomiStatsClient {
 
     /**
      * Alliances in currently active wars (the closest public analogue to DomiStats'
-     * VIP-only "War Radar / spinning" data). Source: the /wars listing (100 live wars).
+     * VIP-only "War Radar / spinning" data). Source: the /wars listing (100 live wars),
+     * enriched with full stats (members, win rate, league) from the /ranking index.
      */
     @Cacheable(CacheConfig.SPINNING_LIST_CACHE)
     public List<AllianceSummary> fetchSpinningAlliances() {
-        Document doc = fetchWithRetry(props.getBaseUrl() + "/wars");
-        if (doc == null) {
+        Document warDoc = fetchWithRetry(props.getBaseUrl() + "/wars");
+        if (warDoc == null) {
             return List.of();
         }
+        Map<String, AllianceSummary> index = buildRankingIndex();
         List<AllianceSummary> results = new ArrayList<>();
         Set<String> seenIds = new HashSet<>();
-        for (Element warBlock : doc.select("div.war")) {
-            Element left = warBlock.selectFirst(".war-opponent-left");
-            Element right = warBlock.selectFirst(".war-opponent-right");
-            addWarAlliance(results, seenIds, left);
-            addWarAlliance(results, seenIds, right);
+        for (Element warBlock : warDoc.select("div.war")) {
+            addWarAlliance(results, seenIds, warBlock.selectFirst(".war-opponent-left"), index);
+            addWarAlliance(results, seenIds, warBlock.selectFirst(".war-opponent-right"), index);
         }
+        results.sort((a, b) -> Integer.compare(rankOrMax(a), rankOrMax(b)));
         return results;
     }
 
-    private void addWarAlliance(List<AllianceSummary> results, Set<String> seenIds, Element block) {
+    private static int rankOrMax(AllianceSummary s) {
+        return s.getRanking() == null ? Integer.MAX_VALUE : s.getRanking();
+    }
+
+    /** Parses the /ranking page (top 400) into an id-index for enriching active-war entries. */
+    private Map<String, AllianceSummary> buildRankingIndex() {
+        Map<String, AllianceSummary> index = new HashMap<>();
+        Document doc = fetchWithRetry(props.getBaseUrl() + "/ranking");
+        if (doc == null) {
+            return index;
+        }
+        for (Element row : doc.select("table.good-table > tbody > tr")) {
+            try {
+                AllianceSummary s = parseAllianceSummaryRow(row, false);
+                if (s.getDomistatsId() != null && s.getName() != null) {
+                    index.put(s.getDomistatsId(), s);
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse a ranking row while indexing, skipping: {}", e.getMessage());
+            }
+        }
+        return index;
+    }
+
+    private void addWarAlliance(List<AllianceSummary> results, Set<String> seenIds, Element block,
+                                Map<String, AllianceSummary> index) {
         if (block == null) {
             return;
         }
         try {
             AllianceSummary summary = parseWarAllianceSummary(block);
-            if (summary.getDomistatsId() != null && seenIds.add(summary.getDomistatsId())) {
-                results.add(summary);
+            if (summary.getDomistatsId() == null || !seenIds.add(summary.getDomistatsId())) {
+                return;
             }
+            AllianceSummary richer = index.get(summary.getDomistatsId());
+            if (richer != null) {
+                summary = AllianceSummary.builder()
+                        .domistatsId(richer.getDomistatsId())
+                        .name(richer.getName())
+                        .glory(richer.getGlory() != null ? richer.getGlory() : summary.getGlory())
+                        .ranking(richer.getRanking() != null ? richer.getRanking() : summary.getRanking())
+                        .memberCount(richer.getMemberCount())
+                        .league(richer.getLeague() != null ? richer.getLeague() : summary.getLeague())
+                        .winRate(richer.getWinRate())
+                        .estimatedWeight(richer.getEstimatedWeight())
+                        .spinning(true)
+                        .inWar(true)
+                        .profileUrl(props.getBaseUrl() + "/alliance/" + richer.getDomistatsId())
+                        .build();
+            }
+            results.add(summary);
         } catch (Exception e) {
             log.warn("Failed to parse an active-war alliance, skipping: {}", e.getMessage());
         }
@@ -355,36 +400,25 @@ public class DomiStatsClient {
     private AllianceSummary parseWarAllianceSummary(Element block) {
         Element link = block.selectFirst("a[href^='/alliance_wars/']");
         String id = null;
-        String profileUrl = null;
         if (link != null) {
             id = extractId(link.attr("href"));
-            profileUrl = link.absUrl("href");
         }
 
-        String leagueRaw = text(block, ".war-alliance-ranking.league-ranking.no-wrap");
-        String league = null;
-        int leagueRank = -1;
-        if (leagueRaw != null) {
-            Matcher m = Pattern.compile("(\\D+)\\s*#?(\\d+)").matcher(leagueRaw.trim());
-            if (m.matches()) {
-                league = m.group(1).trim().isEmpty() ? null : m.group(1).trim();
-                leagueRank = parseInt(m.group(2));
-            }
-        }
+        String leagueRaw = text(block, ".war-alliance-ranking.league-ranking");
+        String league = rankLeague(leagueRaw);
 
         return AllianceSummary.builder()
                 .domistatsId(id)
                 .name(text(block, ".war-alliance-name"))
                 .glory(parseInt(text(block, ".war-alliance-glory")))
-                .ranking(parseInt(text(block, ".war-alliance-ranking.no-wrap")))
+                .ranking(parseInt(text(block, ".war-alliance-ranking:not(.league-ranking).no-wrap")))
                 .memberCount(null)
-                .league(league != null ? league : rankLeague(leagueRaw))
+                .league(league)
                 .winRate(null)
                 .estimatedWeight(null)
                 .spinning(false)
                 .inWar(true)
-                .currentWarId(null)
-                .profileUrl(profileUrl)
+                .profileUrl(id != null ? props.getBaseUrl() + "/alliance/" + id : null)
                 .build();
     }
 
@@ -411,7 +445,8 @@ public class DomiStatsClient {
         if (trimmed.isEmpty() || Character.isDigit(trimmed.charAt(0))) {
             return null;
         }
-        return trimmed.split("\\s+|#")[0];
+        String leagueName = trimmed.split("\\s+|#")[0];
+        return leagueName.isEmpty() ? null : leagueName;
     }
 
     /** "41 / 42" -> 42 (total members). */
