@@ -4,8 +4,11 @@ import com.domistats.bot.entity.GuildConfig;
 import lombok.extern.slf4j.Slf4j;
 import net.dv8tion.jda.api.EmbedBuilder;
 import net.dv8tion.jda.api.JDA;
+import net.dv8tion.jda.api.entities.Message;
 import net.dv8tion.jda.api.entities.channel.middleman.MessageChannel;
 import org.springframework.stereotype.Service;
+
+import java.util.concurrent.TimeUnit;
 
 /** Sends notification embeds to a guild's configured notification channel, if any. */
 @Slf4j
@@ -29,8 +32,19 @@ public class NotificationDispatcher {
             return;
         }
         channel.sendMessageEmbeds(embed.build()).queue(
-                success -> { /* no-op */ },
+                message -> scheduleAutoDelete(config, message),
                 error -> log.warn("Failed to send notification to guild {}: {}", config.getGuildId(), error.getMessage())
         );
+    }
+
+    /** Deletes the message after the guild's configured auto-delete delay (0 = never). */
+    private void scheduleAutoDelete(GuildConfig config, Message message) {
+        int ttlSeconds = config.getAutoDeleteSeconds();
+        if (ttlSeconds <= 0) {
+            return;
+        }
+        message.delete().queueAfter(ttlSeconds, TimeUnit.SECONDS,
+                success -> log.debug("Auto-deleted notification after {}s in guild {}", ttlSeconds, config.getGuildId()),
+                error -> log.warn("Failed to auto-delete notification in guild {}: {}", config.getGuildId(), error.getMessage()));
     }
 }

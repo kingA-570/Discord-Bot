@@ -17,8 +17,10 @@ import org.springframework.stereotype.Component;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -56,23 +58,39 @@ public class DomiStatsClient {
     // Public API
     // ------------------------------------------------------------------
 
-    /** All alliances currently shown as "spinning" / searching for a war. */
+    /**
+     * Alliances in currently active wars (the closest public analogue to DomiStats'
+     * VIP-only "War Radar / spinning" data). Source: the /wars listing (100 live wars).
+     */
     @Cacheable(CacheConfig.SPINNING_LIST_CACHE)
     public List<AllianceSummary> fetchSpinningAlliances() {
-        Document doc = fetchWithRetry(props.getBaseUrl() + "/ranking?status=spinning");
+        Document doc = fetchWithRetry(props.getBaseUrl() + "/wars");
         if (doc == null) {
             return List.of();
         }
         List<AllianceSummary> results = new ArrayList<>();
-        Elements rows = doc.select("table.good-table tbody tr");
-        for (Element row : rows) {
-            try {
-                results.add(parseAllianceSummaryRow(row, true));
-            } catch (Exception e) {
-                log.warn("Failed to parse a spinning-alliance row, skipping: {}", e.getMessage());
-            }
+        Set<String> seenIds = new HashSet<>();
+        for (Element warBlock : doc.select("div.war")) {
+            Element left = warBlock.selectFirst(".war-opponent-left");
+            Element right = warBlock.selectFirst(".war-opponent-right");
+            addWarAlliance(results, seenIds, left);
+            addWarAlliance(results, seenIds, right);
         }
         return results;
+    }
+
+    private void addWarAlliance(List<AllianceSummary> results, Set<String> seenIds, Element block) {
+        if (block == null) {
+            return;
+        }
+        try {
+            AllianceSummary summary = parseWarAllianceSummary(block);
+            if (summary.getDomistatsId() != null && seenIds.add(summary.getDomistatsId())) {
+                results.add(summary);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse an active-war alliance, skipping: {}", e.getMessage());
+        }
     }
 
     /** Full detail page for one alliance. */
@@ -91,7 +109,7 @@ public class DomiStatsClient {
         if (doc == null) {
             return Optional.empty();
         }
-        Element row = doc.selectFirst("table.good-table tbody tr");
+        Element row = doc.selectFirst("table.good-table > tbody > tr");
         if (row == null) {
             return Optional.empty();
         }
@@ -211,7 +229,7 @@ public class DomiStatsClient {
      * Historic Glory, Win Ratio, Members, Parliament, Last War, Perks, League, ...
      */
     private AllianceSummary parseAllianceSummaryRow(Element row, boolean spinningMarked) {
-        Element nameLink = row.selectFirst("td.alliance-name a[href^='/alliance/']");
+        Element nameLink = row.selectFirst("td:nth-child(2) a[href^='/alliance/']");
         String id = null;
         String profileUrl = null;
         if (nameLink != null) {
@@ -219,23 +237,23 @@ public class DomiStatsClient {
             profileUrl = nameLink.absUrl("href");
         }
 
-        String name = text(row, "td.alliance-name .name-container .alliance-name");
+        String name = text(row, "td:nth-child(2) .name-container .alliance-name");
         if (name == null || name.isBlank()) {
-            name = text(row, "td.alliance-name .name-icons") != null
-                    ? text(row, "td.alliance-name span.alliance-name")
+            name = text(row, "td:nth-child(2) .name-icons") != null
+                    ? text(row, "td:nth-child(2) span.alliance-name")
                     : null;
         }
 
-        String league = rankLeague(text(row, "td:nth-child(14)"));
+        String league = rankLeague(text(row, "td:nth-child(11)"));
 
         return AllianceSummary.builder()
                 .domistatsId(id)
                 .name(name)
-                .glory(parseInt(text(row, "td:nth-child(7) .alliance-name")))
+                .glory(parseInt(text(row, "td:nth-child(4) .alliance-name")))
                 .ranking(parseInt(text(row, "td:nth-child(1)")))
-                .memberCount(parseTotalMembers(text(row, "td:nth-child(10)")))
+                .memberCount(parseTotalMembers(text(row, "td:nth-child(7)")))
                 .league(league)
-                .winRate(parsePercent(text(row, "td:nth-child(9)")))
+                .winRate(parsePercent(text(row, "td:nth-child(6)")))
                 .estimatedWeight(null)
                 .spinning(spinningMarked)
                 .inWar(false)

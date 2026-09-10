@@ -49,6 +49,9 @@ public class GuildConfig {
     @Column(name = "notify_member_change", nullable = false)
     private boolean notifyMemberChange = false;
 
+    @Column(name = "auto_delete_seconds", nullable = false)
+    private int autoDeleteSeconds = 0;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 

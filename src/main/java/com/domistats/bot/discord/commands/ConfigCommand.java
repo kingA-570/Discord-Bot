@@ -47,6 +47,8 @@ public class ConfigCommand implements CommandHandler {
                                                 .addChoice("Member change", "members"),
                                         new OptionData(OptionType.BOOLEAN, "enabled", "Enable (true) or disable (false)", true)
                                 ),
+                        new SubcommandData("autodelete", "Auto-delete notification messages after N seconds (0 = keep forever).")
+                                .addOptions(new OptionData(OptionType.INTEGER, "seconds", "Seconds to keep notification messages (0 disables auto-delete)", true)),
                         new SubcommandData("status", "Show current configuration for this server.")
                 );
     }
@@ -73,17 +75,25 @@ public class ConfigCommand implements CommandHandler {
                 guildConfigService.toggleNotification(guildId, type, enabled);
                 event.reply("✅ `" + type + "` notifications " + (enabled ? "enabled" : "disabled") + ".").queue();
             }
+            case "autodelete" -> {
+                int seconds = event.getOption("seconds").getAsInt();
+                guildConfigService.setAutoDeleteSeconds(guildId, seconds);
+                event.reply("✅ Notification messages will self-delete after **" + seconds + "**s"
+                        + (seconds == 0 ? " (auto-delete disabled)." : ".")).queue();
+            }
             case "status" -> {
                 GuildConfig config = guildConfigService.getOrCreate(guildId);
                 String summary = """
                         **War Radar Configuration**
                         Notification channel: %s
                         Dashboard channel: %s
+                        Auto-delete notifications: %s
                         New spin: %s | War found: %s | Watchlist: %s
                         War finished: %s | Glory change: %s | Member change: %s
                         """.formatted(
                         mention(config.getNotificationChannelId()),
                         mention(config.getDashboardChannelId()),
+                        config.getAutoDeleteSeconds() == 0 ? "_off_" : config.getAutoDeleteSeconds() + "s",
                         onOff(config.isNotifyNewSpin()), onOff(config.isNotifyWarFound()), onOff(config.isNotifyWatchlistActivity()),
                         onOff(config.isNotifyWarFinished()), onOff(config.isNotifyGloryChange()), onOff(config.isNotifyMemberChange())
                 );

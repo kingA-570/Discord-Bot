@@ -66,6 +66,14 @@ public class GuildConfigService {
         repo.save(config);
     }
 
+    @Transactional
+    public GuildConfig setAutoDeleteSeconds(String guildId, int seconds) {
+        GuildConfig config = getOrCreate(guildId);
+        config.setAutoDeleteSeconds(Math.max(0, seconds));
+        config.setUpdatedAt(Instant.now());
+        return repo.save(config);
+    }
+
     public List<GuildConfig> allWithDashboards() {
         return repo.findByDashboardChannelIdIsNotNull();
     }
